@@ -88,35 +88,51 @@ impl ResolvAddr {
 }
 
 /// This newtype implements `ParseArg` for `Network`.
-#[derive(Deserialize)]
-pub struct BitcoinNetwork(Network);
+#[derive(Copy, Clone, Debug, Deserialize, Eq, PartialEq)]
+pub enum ElectrsNetwork {
+    Bitcoin(Network),
+    DigiByte,
+}
 
-impl Default for BitcoinNetwork {
+impl Default for ElectrsNetwork {
     fn default() -> Self {
-        BitcoinNetwork(Network::Bitcoin)
+        ElectrsNetwork::Bitcoin(Network::Bitcoin)
     }
 }
 
-impl FromStr for BitcoinNetwork {
-    type Err = <Network as FromStr>::Err;
+impl FromStr for ElectrsNetwork {
+    type Err = String;
 
     fn from_str(string: &str) -> std::result::Result<Self, Self::Err> {
-        Network::from_str(string).map(BitcoinNetwork)
+        if string.eq_ignore_ascii_case("digibyte")
+            || string.eq_ignore_ascii_case("dgb")
+        {
+            // Temporary placeholder. We will give DigiByte its own
+            // chain parameters in the next steps.
+            return Ok(ElectrsNetwork::DigiByte);
+        }
+
+        Network::from_str(string)
+            .map(ElectrsNetwork::Bitcoin)
+            .map_err(|err| err.to_string())
     }
 }
 
-impl ::configure_me::parse_arg::ParseArgFromStr for BitcoinNetwork {
+impl ::configure_me::parse_arg::ParseArgFromStr for ElectrsNetwork {
     fn describe_type<W: fmt::Write>(mut writer: W) -> fmt::Result {
         write!(
             writer,
-            "either 'bitcoin', 'testnet', 'testnet4', 'regtest' or 'signet'"
+            "either 'bitcoin', 'testnet', 'testnet4', 'regtest', 'signet' or 'digibyte'"
         )
     }
 }
 
-impl From<BitcoinNetwork> for Network {
-    fn from(network: BitcoinNetwork) -> Network {
-        network.0
+impl From<ElectrsNetwork> for Network {
+    fn from(network: ElectrsNetwork) -> Network {
+        match network {
+            ElectrsNetwork::Bitcoin(network) => network,
+            ElectrsNetwork::DigiByte => Network::Bitcoin,
+        }
     }
 }
 
@@ -203,58 +219,71 @@ impl Config {
         }
 
         let db_subdir = match config.network {
-            Network::Bitcoin => "bitcoin",
-            Network::Testnet => "testnet",
-            Network::Testnet4 => "testnet4",
-            Network::Regtest => "regtest",
-            Network::Signet => "signet",
-            unsupported => unsupported_network(unsupported),
+            ElectrsNetwork::Bitcoin(Network::Bitcoin) => "bitcoin",
+            ElectrsNetwork::Bitcoin(Network::Testnet) => "testnet",
+            ElectrsNetwork::Bitcoin(Network::Testnet4) => "testnet4",
+            ElectrsNetwork::Bitcoin(Network::Regtest) => "regtest",
+            ElectrsNetwork::Bitcoin(Network::Signet) => "signet",
+            ElectrsNetwork::DigiByte => "digibyte",
+            ElectrsNetwork::Bitcoin(unsupported) => unsupported_network(unsupported),
         };
 
         config.db_dir.push(db_subdir);
 
         let default_daemon_rpc_port = match config.network {
-            Network::Bitcoin => 8332,
-            Network::Testnet => 18332,
-            Network::Testnet4 => 48332,
-            Network::Regtest => 18443,
-            Network::Signet => 38332,
-            unsupported => unsupported_network(unsupported),
+            ElectrsNetwork::Bitcoin(Network::Bitcoin) => 8332,
+            ElectrsNetwork::Bitcoin(Network::Testnet) => 18332,
+            ElectrsNetwork::Bitcoin(Network::Testnet4) => 48332,
+            ElectrsNetwork::Bitcoin(Network::Regtest) => 18443,
+            ElectrsNetwork::Bitcoin(Network::Signet) => 38332,
+            ElectrsNetwork::DigiByte => 14022,
+            ElectrsNetwork::Bitcoin(unsupported) => unsupported_network(unsupported),
         };
         let default_daemon_p2p_port = match config.network {
-            Network::Bitcoin => 8333,
-            Network::Testnet => 18333,
-            Network::Testnet4 => 48333,
-            Network::Regtest => 18444,
-            Network::Signet => 38333,
-            unsupported => unsupported_network(unsupported),
+            ElectrsNetwork::Bitcoin(Network::Bitcoin) => 8333,
+            ElectrsNetwork::Bitcoin(Network::Testnet) => 18333,
+            ElectrsNetwork::Bitcoin(Network::Testnet4) => 48333,
+            ElectrsNetwork::Bitcoin(Network::Regtest) => 18444,
+            ElectrsNetwork::Bitcoin(Network::Signet) => 38333,
+            ElectrsNetwork::DigiByte => 14024,
+            ElectrsNetwork::Bitcoin(unsupported) => unsupported_network(unsupported),
         };
         let default_electrum_port = match config.network {
-            Network::Bitcoin => 50001,
-            Network::Testnet => 60001,
-            Network::Testnet4 => 40001,
-            Network::Regtest => 60401,
-            Network::Signet => 60601,
-            unsupported => unsupported_network(unsupported),
+            ElectrsNetwork::Bitcoin(Network::Bitcoin) => 50001,
+            ElectrsNetwork::Bitcoin(Network::Testnet) => 60001,
+            ElectrsNetwork::Bitcoin(Network::Testnet4) => 40001,
+            ElectrsNetwork::Bitcoin(Network::Regtest) => 60401,
+            ElectrsNetwork::Bitcoin(Network::Signet) => 60601,
+            ElectrsNetwork::DigiByte => 50001,
+            ElectrsNetwork::Bitcoin(unsupported) => unsupported_network(unsupported),
         };
         let default_monitoring_port = match config.network {
-            Network::Bitcoin => 4224,
-            Network::Testnet => 14224,
-            Network::Testnet4 => 44224,
-            Network::Regtest => 24224,
-            Network::Signet => 34224,
-            unsupported => unsupported_network(unsupported),
+            ElectrsNetwork::Bitcoin(Network::Bitcoin) => 4224,
+            ElectrsNetwork::Bitcoin(Network::Testnet) => 14224,
+            ElectrsNetwork::Bitcoin(Network::Testnet4) => 44224,
+            ElectrsNetwork::Bitcoin(Network::Regtest) => 24224,
+            ElectrsNetwork::Bitcoin(Network::Signet) => 34224,
+            ElectrsNetwork::DigiByte => 4225,
+            ElectrsNetwork::Bitcoin(unsupported) => unsupported_network(unsupported),
         };
 
         let magic = match (config.network, config.signet_magic) {
-            (Network::Signet, Some(magic)) => magic.parse().unwrap_or_else(|error| {
-                eprintln!(
-                    "Error: signet magic '{}' is not a valid hex string: {}",
-                    magic, error
-                );
-                std::process::exit(1);
-            }),
-            (network, None) => network.magic(),
+            (ElectrsNetwork::Bitcoin(Network::Signet), Some(magic)) => {
+                magic.parse().unwrap_or_else(|error| {
+                    eprintln!(
+                        "Error: signet magic '{}' is not a valid hex string: {}",
+                        magic, error
+                    );
+                    std::process::exit(1);
+                })
+            }
+
+            (ElectrsNetwork::DigiByte, None) => {
+                Magic::from_bytes([0xfa, 0xc3, 0xb6, 0xda])
+            }
+
+            (ElectrsNetwork::Bitcoin(network), None) => network.magic(),
+
             (_, Some(_)) => {
                 eprintln!("Error: signet magic only available on signet");
                 std::process::exit(1);
@@ -286,12 +315,13 @@ impl Config {
         );
 
         match config.network {
-            Network::Bitcoin => (),
-            Network::Testnet => config.daemon_dir.push("testnet3"),
-            Network::Testnet4 => config.daemon_dir.push("testnet4"),
-            Network::Regtest => config.daemon_dir.push("regtest"),
-            Network::Signet => config.daemon_dir.push("signet"),
-            unsupported => unsupported_network(unsupported),
+            ElectrsNetwork::Bitcoin(Network::Bitcoin) => (),
+            ElectrsNetwork::Bitcoin(Network::Testnet) => config.daemon_dir.push("testnet3"),
+            ElectrsNetwork::Bitcoin(Network::Testnet4) => config.daemon_dir.push("testnet4"),
+            ElectrsNetwork::Bitcoin(Network::Regtest) => config.daemon_dir.push("regtest"),
+            ElectrsNetwork::Bitcoin(Network::Signet) => config.daemon_dir.push("signet"),
+            ElectrsNetwork::DigiByte => (),
+            ElectrsNetwork::Bitcoin(unsupported) => unsupported_network(unsupported),
         }
 
         let mut deprecated_options_used = false;
@@ -352,7 +382,7 @@ impl Config {
         }
 
         let config = Config {
-            network: config.network,
+            network: config.network.into(),
             db_path: config.db_dir,
             db_log_dir: config.db_log_dir,
             db_parallelism: config.db_parallelism,
