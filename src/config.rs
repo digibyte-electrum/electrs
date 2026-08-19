@@ -245,7 +245,7 @@ impl Config {
             ElectrsNetwork::Bitcoin(Network::Testnet4) => 48333,
             ElectrsNetwork::Bitcoin(Network::Regtest) => 18444,
             ElectrsNetwork::Bitcoin(Network::Signet) => 38333,
-            ElectrsNetwork::DigiByte => 14024,
+            ElectrsNetwork::DigiByte => 12024,
             ElectrsNetwork::Bitcoin(unsupported) => unsupported_network(unsupported),
         };
         let default_electrum_port = match config.network {
