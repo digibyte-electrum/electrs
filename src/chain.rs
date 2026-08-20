@@ -1,7 +1,10 @@
 use std::collections::HashMap;
 
-use bitcoin::blockdata::block::Header as BlockHeader;
-use bitcoin::{BlockHash, Network};
+use bitcoin::blockdata::block::{Header as BlockHeader, Version};
+use bitcoin::hashes::Hash;
+use bitcoin::{BlockHash, CompactTarget, TxMerkleNode};
+
+use crate::config::ElectrsNetwork;
 
 /// A new header found, to be added to the chain at specific height
 pub(crate) struct NewHeader {
@@ -36,12 +39,28 @@ pub struct Chain {
 
 impl Chain {
     // create an empty chain
-    pub fn new(network: Network) -> Self {
-        let genesis = bitcoin::blockdata::constants::genesis_block(network);
-        let genesis_hash = genesis.block_hash();
+    pub fn new(network: ElectrsNetwork) -> Self {
+        let genesis_header = match network {
+            ElectrsNetwork::Bitcoin(network) => {
+                bitcoin::blockdata::constants::genesis_block(network).header
+            }
+            ElectrsNetwork::DigiByte => BlockHeader {
+                version: Version::ONE,
+                prev_blockhash: BlockHash::all_zeros(),
+                merkle_root: "72ddd9496b004221ed0557358846d9248ecd4c440ebd28ed901efc18757d0fad"
+                    .parse::<TxMerkleNode>()
+                    .expect("valid DigiByte genesis merkle root"),
+                time: 1_389_388_394,
+                bits: CompactTarget::from_consensus(0x1e0ffff0),
+                nonce: 2_447_652,
+            },
+        };
+
+        let genesis_hash = genesis_header.block_hash();
+
         Self {
-            headers: vec![(genesis_hash, genesis.header)],
-            heights: std::iter::once((genesis_hash, 0)).collect(), // genesis header @ zero height
+            headers: vec![(genesis_hash, genesis_header)],
+            heights: std::iter::once((genesis_hash, 0)).collect(),
         }
     }
 
@@ -145,6 +164,7 @@ impl Chain {
 #[cfg(test)]
 mod tests {
     use super::{Chain, NewHeader};
+    use crate::config::ElectrsNetwork;
     use bitcoin::blockdata::block::Header as BlockHeader;
     use bitcoin::consensus::deserialize;
     use bitcoin::Network::Regtest;
@@ -152,11 +172,23 @@ mod tests {
 
     #[test]
     fn test_genesis() {
-        let regtest = Chain::new(Regtest);
+        let regtest = Chain::new(ElectrsNetwork::Bitcoin(Regtest));
         assert_eq!(regtest.height(), 0);
         assert_eq!(
             regtest.tip(),
             "0f9188f13cb7b2c71f2a335e3a4fc328bf5beb436012afca590b1a11466e2206"
+                .parse()
+                .unwrap()
+        );
+    }
+
+    #[test]
+    fn test_digibyte_genesis() {
+        let digibyte = Chain::new(ElectrsNetwork::DigiByte);
+        assert_eq!(digibyte.height(), 0);
+        assert_eq!(
+            digibyte.tip(),
+            "7497ea1b465eb39f1c8f507bc877078fe016d6fcb6dfad3a64c98dcc6e1e8496"
                 .parse()
                 .unwrap()
         );
@@ -182,7 +214,7 @@ hex!("000000200030d7f9c11ef35b89a0eefb9a5e449909339b5e7854d99804ea8d6a49bf900a03
             .collect();
 
         for chunk_size in 1..headers.len() {
-            let mut regtest = Chain::new(Regtest);
+            let mut regtest = Chain::new(ElectrsNetwork::Bitcoin(Regtest));
             let mut height = 0;
             let mut tip = regtest.tip();
             for chunk in headers.chunks(chunk_size) {
@@ -201,7 +233,7 @@ hex!("000000200030d7f9c11ef35b89a0eefb9a5e449909339b5e7854d99804ea8d6a49bf900a03
         }
 
         // test loading from a list of headers and tip
-        let mut regtest = Chain::new(Regtest);
+        let mut regtest = Chain::new(ElectrsNetwork::Bitcoin(Regtest));
         regtest.load(
             headers.iter().copied(),
             headers.last().unwrap().block_hash(),
@@ -241,7 +273,7 @@ hex!("000000200030d7f9c11ef35b89a0eefb9a5e449909339b5e7854d99804ea8d6a49bf900a03
         );
 
         // test reorg
-        let mut regtest = Chain::new(Regtest);
+        let mut regtest = Chain::new(ElectrsNetwork::Bitcoin(Regtest));
         regtest.load(
             headers.iter().copied(),
             headers.last().unwrap().block_hash(),

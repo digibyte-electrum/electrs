@@ -140,7 +140,7 @@ impl From<ElectrsNetwork> for Network {
 #[derive(Debug)]
 pub struct Config {
     // See below for the documentation of each field:
-    pub network: Network,
+    pub network: ElectrsNetwork,
     pub db_path: PathBuf,
     pub db_log_dir: Option<PathBuf>,
     pub db_parallelism: u8,
@@ -382,7 +382,7 @@ impl Config {
         }
 
         let config = Config {
-            network: config.network.into(),
+            network: config.network,
             db_path: config.db_dir,
             db_log_dir: config.db_log_dir,
             db_parallelism: config.db_parallelism,
