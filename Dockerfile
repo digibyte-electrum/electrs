@@ -22,3 +22,16 @@ FROM base AS result
 COPY --from=electrs-build /root/.cargo/bin/electrs /usr/bin/electrs
 
 WORKDIR /
+
+RUN groupadd --gid 568 electrs \
+    && useradd --uid 568 --gid electrs --home-dir /home/electrs --create-home \
+        --shell /usr/sbin/nologin electrs \
+    && install --directory --owner=electrs --group=electrs /data
+
+ENV HOME=/home/electrs \
+    ELECTRS_DB_DIR=/data
+
+EXPOSE 50001 4225
+
+USER electrs
+ENTRYPOINT ["/usr/bin/electrs"]
