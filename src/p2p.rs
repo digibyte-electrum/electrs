@@ -15,7 +15,7 @@ use bitcoin::{
         message_network, Magic,
     },
     secp256k1::{self, rand::Rng},
-    Block, BlockHash, Network,
+    Block, BlockHash,
 };
 use bitcoin_slices::{bsl, Parse};
 use crossbeam_channel::{bounded, select, Receiver, Sender};
@@ -27,7 +27,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use crate::types::SerBlock;
 use crate::{
     chain::{Chain, NewHeader},
-    config::ELECTRS_VERSION,
+    config::{ElectrsNetwork, ELECTRS_VERSION},
     metrics::{default_duration_buckets, default_size_buckets, Histogram, Metrics},
 };
 
@@ -136,13 +136,13 @@ impl Connection {
     }
 
     pub(crate) fn connect(
-        network: Network,
+        network: ElectrsNetwork,
         address: SocketAddr,
         metrics: &Metrics,
         magic: Magic,
     ) -> Result<Self> {
         let recv_conn = TcpStream::connect(address)
-            .with_context(|| format!("{} p2p failed to connect: {:?}", network, address))?;
+            .with_context(|| format!("{:?} p2p failed to connect: {:?}", network, address))?;
         let mut send_conn = recv_conn
             .try_clone()
             .context("failed to clone connection")?;
@@ -248,7 +248,7 @@ impl Connection {
         let (new_block_send, new_block_recv) = bounded::<()>(0);
         let (init_send, init_recv) = bounded::<()>(0);
 
-        tx_send.send(build_version_message())?;
+        tx_send.send(build_version_message(network))?;
 
         crate::thread::spawn("p2p_loop", move || loop {
             select! {
@@ -320,7 +320,7 @@ impl Connection {
     }
 }
 
-fn build_version_message() -> NetworkMessage {
+fn build_version_message(network: ElectrsNetwork) -> NetworkMessage {
     let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)), 0);
     let timestamp = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -330,7 +330,10 @@ fn build_version_message() -> NetworkMessage {
     let services = p2p::ServiceFlags::NONE;
 
     NetworkMessage::Version(message_network::VersionMessage {
-        version: p2p::PROTOCOL_VERSION,
+        version: match network {
+            ElectrsNetwork::Bitcoin(_) => p2p::PROTOCOL_VERSION,
+            ElectrsNetwork::DigiByte => 70019,
+        },
         services,
         timestamp,
         receiver: address::Address::new(&addr, services),
@@ -366,6 +369,10 @@ impl RawNetworkMessage {
             }
             "ping" => ParsedNetworkMessage::Ping(Decodable::consensus_decode(&mut raw)?),
             "pong" => ParsedNetworkMessage::Ignored, // unused
+            "wtxidrelay" => ParsedNetworkMessage::Ignored,
+            "sendaddrv2" => ParsedNetworkMessage::Ignored,
+            "sendcmpct" => ParsedNetworkMessage::Ignored,
+            "feefilter" => ParsedNetworkMessage::Ignored,
             "addr" => ParsedNetworkMessage::Ignored, // unused
             "alert" => ParsedNetworkMessage::Ignored, // https://bitcoin.org/en/alert/2016-11-01-alert-retirement
             _ => bail!(

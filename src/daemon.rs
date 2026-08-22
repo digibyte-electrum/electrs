@@ -14,7 +14,7 @@ use std::path::Path;
 
 use crate::{
     chain::{Chain, NewHeader},
-    config::Config,
+    config::{Config, ElectrsNetwork},
     metrics::Metrics,
     p2p::Connection,
     signals::ExitFlag,
@@ -27,7 +27,7 @@ enum PollResult {
 }
 
 fn rpc_poll(client: &mut Client, skip_block_download_wait: bool) -> PollResult {
-    match client.get_blockchain_info() {
+    match client.call::<json::GetBlockchainInfoResult>("getblockchaininfo", &[]) {
         Ok(info) => {
             if skip_block_download_wait {
                 // bitcoind RPC is available, don't wait for block download to finish
@@ -127,19 +127,19 @@ impl Daemon {
         }
 
         let network_info = rpc.get_network_info()?;
-        if network_info.version < 21_00_00 {
+        if matches!(config.network, ElectrsNetwork::Bitcoin(_)) && network_info.version < 21_00_00 {
             bail!("electrs requires bitcoind 0.21+");
         }
         if !network_info.network_active {
             bail!("electrs requires active bitcoind p2p network");
         }
-        let info = rpc.get_blockchain_info()?;
+        let info = rpc.call::<json::GetBlockchainInfoResult>("getblockchaininfo", &[])?;
         if info.pruned {
             bail!("electrs requires non-pruned bitcoind node");
         }
 
         let p2p = Mutex::new(Connection::connect(
-            config.network.into(),
+            config.network,
             config.daemon_p2p_addr,
             metrics,
             config.signet_magic,
