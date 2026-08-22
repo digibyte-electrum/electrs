@@ -1,0 +1,43 @@
+name: electrs-digibyte
+
+services:
+  electrs:
+    image: ghcr.io/digibyte-electrum/electrs:digibyte-support
+    pull_policy: always
+    container_name: dgb_electrs
+    user: "568:568"
+    restart: unless-stopped
+    stop_grace_period: 2m
+    command:
+      - --conf
+      - /electrs.toml
+    configs:
+      - source: electrs_config
+        target: /electrs.toml
+        uid: "568"
+        gid: "568"
+        mode: 0440
+    networks:
+      - dgb-electrum-net
+    ports:
+      - "50011:50001"
+    volumes:
+      - type: bind
+        source: /mnt/RAIDZ1APPS/electrs-digibyte
+        target: /data
+
+configs:
+  electrs_config:
+    content: |
+      network = "digibyte"
+      auth = "electrumx:CHANGE_THIS_TO_THE_DIGIBYTE_RPC_PASSWORD"
+      daemon_rpc_addr = "digibyte:14022"
+      daemon_p2p_addr = "digibyte:12024"
+      electrum_rpc_addr = "0.0.0.0:50001"
+      monitoring_addr = "0.0.0.0:4225"
+      db_dir = "/data"
+
+networks:
+  dgb-electrum-net:
+    external: true
+    name: dgb-electrum-net
