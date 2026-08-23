@@ -105,9 +105,18 @@ where
 
 /// This newtype implements `ParseArg` for `Network`.
 #[derive(Copy, Clone, Debug, Deserialize, Eq, PartialEq)]
+#[serde(try_from = "String")]
 pub enum ElectrsNetwork {
     Bitcoin(Network),
     DigiByte,
+}
+
+impl TryFrom<String> for ElectrsNetwork {
+    type Error = String;
+
+    fn try_from(value: String) -> std::result::Result<Self, Self::Error> {
+        value.parse()
+    }
 }
 
 impl Default for ElectrsNetwork {
@@ -437,7 +446,8 @@ impl Config {
 
 #[cfg(test)]
 mod tests {
-    use super::{select_resolved_addr, Auth, SensitiveAuth};
+    use super::{select_resolved_addr, Auth, ElectrsNetwork, SensitiveAuth};
+    use bitcoin::Network;
     use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr};
     use std::path::Path;
 
@@ -448,6 +458,22 @@ mod tests {
 
         assert_eq!(select_resolved_addr([ipv6, ipv4]), Some(ipv4));
         assert_eq!(select_resolved_addr([ipv6]), Some(ipv6));
+    }
+
+    #[test]
+    fn test_network_deserialization_uses_cli_parser() {
+        assert_eq!(
+            serde_json::from_str::<ElectrsNetwork>(r#""digibyte""#).unwrap(),
+            ElectrsNetwork::DigiByte
+        );
+        assert_eq!(
+            serde_json::from_str::<ElectrsNetwork>(r#""dgb""#).unwrap(),
+            ElectrsNetwork::DigiByte
+        );
+        assert_eq!(
+            serde_json::from_str::<ElectrsNetwork>(r#""bitcoin""#).unwrap(),
+            ElectrsNetwork::Bitcoin(Network::Bitcoin)
+        );
     }
 
     #[test]
