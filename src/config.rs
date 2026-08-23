@@ -73,7 +73,7 @@ impl ResolvAddr {
     /// Resolves the address.
     fn resolve(self) -> std::result::Result<SocketAddr, AddressError> {
         match self.0.to_socket_addrs() {
-            Ok(mut iter) => iter.next().ok_or(AddressError::NoAddrError(self.0)),
+            Ok(iter) => select_resolved_addr(iter).ok_or(AddressError::NoAddrError(self.0)),
             Err(err) => Err(AddressError::ResolvError { addr: self.0, err }),
         }
     }
@@ -85,6 +85,22 @@ impl ResolvAddr {
             std::process::exit(1)
         })
     }
+}
+
+fn select_resolved_addr<I>(addresses: I) -> Option<SocketAddr>
+where
+    I: IntoIterator<Item = SocketAddr>,
+{
+    let mut fallback = None;
+    for address in addresses {
+        if address.is_ipv4() {
+            return Some(address);
+        }
+        if fallback.is_none() {
+            fallback = Some(address);
+        }
+    }
+    fallback
 }
 
 /// This newtype implements `ParseArg` for `Network`.
@@ -421,8 +437,18 @@ impl Config {
 
 #[cfg(test)]
 mod tests {
-    use super::{Auth, SensitiveAuth};
+    use super::{select_resolved_addr, Auth, SensitiveAuth};
+    use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr};
     use std::path::Path;
+
+    #[test]
+    fn test_resolved_address_prefers_ipv4_with_ipv6_fallback() {
+        let ipv4 = SocketAddr::from((Ipv4Addr::LOCALHOST, 14022));
+        let ipv6 = SocketAddr::from((Ipv6Addr::LOCALHOST, 14022));
+
+        assert_eq!(select_resolved_addr([ipv6, ipv4]), Some(ipv4));
+        assert_eq!(select_resolved_addr([ipv6]), Some(ipv6));
+    }
 
     #[test]
     fn test_auth_debug() {
