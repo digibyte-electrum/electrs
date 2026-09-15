@@ -434,6 +434,7 @@ impl Config {
             ELECTRS_VERSION, ARCH, OS, config
         );
         let mut builder = env_logger::Builder::from_default_env();
+        builder.filter_level(log::LevelFilter::Info);
         builder.default_format().format_timestamp_millis();
         if let Some(log_filters) = &log_filters {
             builder.parse_filters(log_filters);
