@@ -190,6 +190,102 @@ After deployment, follow the electrs logs. The first startup builds the index
 and can take a significant amount of time. Restarting the container does not
 discard a completed index; it resumes from the data stored in `/data`.
 
+## Running directly with Docker on Linux
+
+The TrueNAS instructions above are only one way to deploy this project. The
+same DigiByte node and electrs containers can run on Debian, Ubuntu, or another
+Linux AMD64 host with Docker Compose. TrueNAS Apps simply provides a graphical
+way to manage the same container definitions.
+
+The node and electrs containers must share the Docker network
+`dgb-electrum-net`. The node is reached internally as `digibyte`, so the
+containers do not need to communicate through the host IP address. Only electrs
+needs to publish an external port for wallet connections.
+
+Save the following as `digibyte-node.yml`, replacing the data path and RPC
+password before starting it:
+
+```yaml
+networks:
+  dgb-electrum-net:
+    driver: bridge
+    name: dgb-electrum-net
+
+services:
+  digibyte:
+    command: >-
+      digibyted -server=1 -listen=1 -txindex=1 -dbcache=256 -maxmempool=64
+      -par=0 -rpcuser=dgb_electrum
+      -rpcpassword=CHANGE_THIS_TO_A_LONG_RANDOM_PASSWORD
+      -rpcbind=0.0.0.0 -rpcallowip=127.0.0.1/32
+      -rpcallowip=192.168.1.0/24 -rpcallowip=172.16.0.0/12
+      -rpcport=14022 -maxconnections=32
+    container_name: dgb_full_node
+    deploy:
+      resources:
+        limits:
+          cpus: '6.0'
+          memory: 8G
+        reservations:
+          memory: 4096M
+    image: blocknetdx/digibyte:latest
+    networks:
+      dgb-electrum-net:
+        aliases:
+          - digibyte
+    ports:
+      - '14022:14022'
+      - '12024:12024'
+    restart: unless-stopped
+    volumes:
+      - /srv/digibyte/data:/opt/blockchain/data
+```
+
+The node's RPC port does not need to be published to the host because electrs
+uses the Docker network. If host-side RPC access is required for administration,
+publish `14022:14022` only to a trusted interface or restrict it with firewall
+rules. Never expose the RPC port publicly.
+
+Create the node and electrs applications from their respective Compose files:
+
+```bash
+docker compose -f digibyte-node.yml up -d
+docker compose -f electrs-docker-compose.yml up -d
+```
+
+The electrs Compose file can use the same service definition shown in the
+TrueNAS section, with these Linux-specific volume values:
+
+```yaml
+volumes:
+  - /srv/electrs-digibyte/data:/data
+```
+
+Its network declaration must remain external because the node Compose project
+created the shared network:
+
+```yaml
+networks:
+  dgb-electrum-net:
+    external: true
+    name: dgb-electrum-net
+```
+
+The electrs configuration remains:
+
+```toml
+auth = "dgb_electrum:CHANGE_THIS_TO_A_LONG_RANDOM_PASSWORD"
+daemon_rpc_addr = "digibyte:14022"
+daemon_p2p_addr = "digibyte:12024"
+electrum_rpc_addr = "0.0.0.0:50001"
+```
+
+The RPC username and password must be identical in both containers. Start the
+DigiByte node first and wait for its blockchain and `txindex` to synchronize;
+then start electrs and allow it to build its persistent index. The wallet
+connects to the Linux host at `<host-address>:50011:t`, just as it does with a
+TrueNAS deployment.
+
 ## Connecting Electrum-DigiByte
 
 Configure the wallet to connect to the TrueNAS host running electrs:
