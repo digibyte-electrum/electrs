@@ -1,4 +1,4 @@
-![Logo](logo/logo.svg)
+![Logo](logo/logo-digibyte.svg)
 
 # Electrs for DigiByte
 
@@ -323,4 +323,7 @@ network, image, and TrueNAS deployment behavior is documented here.
 ## License and logo
 
 See the repository license and the upstream project for licensing details. The
-repository logo remains the upstream electrs artwork.
+README uses `logo/logo-digibyte.svg`, a DigiByte adaptation of the upstream
+electrs mark. Its central DigiByte symbol is derived from the official
+[DigiByte logos repository](https://github.com/DigiByte-Core/digibyte-logos).
+The original upstream artwork remains available as `logo/logo.svg`.
