@@ -1,72 +1,230 @@
 ![Logo](logo/logo.svg)
 
-# Electrum Server in Rust
+# Electrs for DigiByte
 
-[![CI](https://github.com/romanz/electrs/actions/workflows/rust.yml/badge.svg)](https://github.com/romanz/electrs/actions)
-[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg?style=flat-square)](https://github.com/romanz/electrs/compare)
-[![crates.io](https://img.shields.io/crates/v/electrs.svg)](https://crates.io/crates/electrs)
-[![gitter.im](https://badges.gitter.im/romanz/electrs.svg)](https://gitter.im/romanz/electrs)
+This repository is a DigiByte adaptation of [electrs](https://github.com/romanz/electrs),
+the efficient Rust Electrum server originally written for Bitcoin. It keeps the
+upstream project structure and protocol implementation, while adding DigiByte
+network support and deployment examples for TrueNAS Apps.
 
-An efficient re-implementation of Electrum Server, inspired by [ElectrumX](https://github.com/kyuupichan/electrumx), [Electrum Personal Server](https://github.com/chris-belcher/electrum-personal-server) and [bitcoincore-indexd](https://github.com/jonasschnelli/bitcoincore-indexd).
+An electrs server indexes the blockchain supplied by a local DigiByte full node.
+The resulting index lets an Electrum-compatible DigiByte wallet query balances,
+history, addresses, and transactions without downloading the entire chain into
+the wallet. The full node remains the source of consensus data; electrs is the
+indexing and Electrum-protocol service.
 
-The motivation behind this project is to enable a user to self host an Electrum server,
-with required hardware resources not much beyond those of a [full node](https://en.bitcoin.it/wiki/Full_node#Why_should_you_use_a_full_node_wallet).
-The server indexes the entire Bitcoin blockchain, and the resulting index enables fast queries for any given user wallet,
-allowing the user to keep real-time track of balances and transaction history using the [Electrum wallet](https://electrum.org/).
-Since it runs on the user's own machine, there is no need for the wallet to communicate with external Electrum servers,
-thus preserving the privacy of the user's addresses and balances.
+This project is intended for personal or small-scale use. Do not expose the
+Electrum service or the DigiByte RPC interface directly to the public Internet
+without appropriate access control, firewall rules, and operational hardening.
 
-[BTC Prague 2024 dev/hack/day](https://btcprague.com/dev-hack-day/) slides are here: https://bit.ly/electrs
+## DigiByte and TrueNAS architecture
 
+The recommended deployment contains two applications on one private Docker
+bridge network:
 
-## Usage
+```text
+Electrum DigiByte wallet
+          |
+          | TCP 50011 (Electrum protocol)
+          v
+     dgb_electrs  ---- RPC 14022 / P2P 12024 ---->  dgb_full_node
+       index                                              |
+                                                        blockchain
+```
 
-**Please prefer to use OUR usage guide!**
+The DigiByte node must be fully synchronized before electrs can build a useful
+index. It must also run with `txindex=1`, because electrs needs transaction
+lookup by transaction ID.
 
-External guides can be out-of-date and have various problems.
-At least double-check that the guide you're using is actively maintained.
-If you can't use our guide, please ask about what you don't understand or consider using automated deployments.
+The containers use the shared network `dgb-electrum-net`. Inside that network,
+electrs reaches the node at `digibyte:14022` and `digibyte:12024`; these names
+are container-network addresses and do not depend on the TrueNAS host IP.
 
-Note that this implementation of Electrum server is optimized for **personal/small-scale (family/friends) usage**.
-It's a bad idea to run it publicly as it'd expose you to DoS and maybe also other attacks.
-If you want to run a public server you may be interested in the [Blockstream fork of electrs](https://github.com/Blockstream/electrs)
-which is better optimized for public usage at the cost of consuming *significantly* more resources.
+## Why electrs uses port 50011
 
- * [Installation from source](doc/install.md)
- * [Pre-built binaries](doc/binaries.md) (No official binaries available but a beta repository is available for installation)
- * [Configuration](doc/config.md)
- * [Usage](doc/usage.md)
- * [Monitoring](doc/monitoring.md)
- * [Upgrading](doc/upgrading.md) - **contains information about important changes from older versions**
+The electrs process listens on port `50001` inside its container, which is the
+usual plaintext Electrum protocol port. TrueNAS publishes it as host port
+`50011`:
 
-## Features
+```text
+TrueNAS host 50011 -> electrs container 50001
+```
 
- * Supports Electrum protocol [v1.4](https://electrumx-spesmilo.readthedocs.io/en/latest/protocol.html)
- * Maintains an index over transaction inputs and outputs, allowing fast balance queries
- * Fast synchronization of the Bitcoin blockchain (~6.5 hours for ~504GB @ August 2023) using HDD storage.
- * Low index storage overhead (~10%), relying on a local full node for transaction retrieval
- * Efficient mempool tracker (allowing better fee [estimation](https://github.com/spesmilo/electrum/blob/59c1d03f018026ac301c4e74facfc64da8ae4708/RELEASE-NOTES#L34-L46))
- * Low CPU & memory usage (after initial indexing)
- * [`txindex`](https://github.com/bitcoinbook/bitcoinbook/blob/develop/ch03_bitcoin-core.adoc#txindex) is not required for the Bitcoin node
- * Uses a single [RocksDB](https://github.com/spacejam/rust-rocksdb) database, for better consistency and crash recovery
+This gives DigiByte a stable, recognizable port while avoiding a collision with
+other Electrum servers, such as Bitcoin electrs instances that commonly publish
+host port `50001`. DigiByte wallets should therefore connect to
+`<truenas-host>:50011` using plaintext (`:t` in Electrum server notation).
 
-## Altcoins
+Port `50011` is only a host-side mapping; it does not change the Electrum
+protocol port used between the containers and does not alter DigiByte RPC port
+`14022` or P2P port `12024`.
 
-Altcoins are **not supported**!
-Forks of Bitcoin codebase that relax the consensus rules (hard forks) are also **not supported**.
+## Prerequisites
 
-You may be able to find a fork of electrs that does support them, look around or make your own, just don't file issues/PRs here.
+- A TrueNAS SCALE installation with Docker/Compose-based Custom Apps support.
+- A storage dataset for the DigiByte node data.
+- A separate dataset for the electrs RocksDB index and logs.
+- Enough storage for the DigiByte blockchain and the electrs index.
+- A synchronized DigiByte node image, such as `blocknetdx/digibyte:latest`.
+- The DigiByte electrs image published by this project:
+  `ghcr.io/digibyte-electrum/electrs:digibyte-support`.
 
-## Index database
+Use dataset paths appropriate for your system. The examples intentionally use
+generic paths and credentials; do not copy production passwords from examples.
 
-The database schema is described [here](doc/schema.md).
+## Step 1: Create the DigiByte node Custom App
 
-## Contributing
+In TrueNAS, open **Apps**, choose **Discover Apps** or **Launch Docker Image**
+(the wording depends on the TrueNAS release), select the Custom App/YAML
+workflow, and create the node first. Paste the following Compose-compatible
+custom YAML:
 
-All contributions to this project are welcome. Please refer to the [Contributing Guidelines](CONTRIBUTING.md) for more details.
+```yaml
+networks:
+  dgb-electrum-net:
+    driver: bridge
+    name: dgb-electrum-net
 
-## Logo
+services:
+  digibyte:
+    command: >-
+      digibyted -server=1 -listen=1 -txindex=1 -dbcache=256 -maxmempool=64
+      -par=0 -rpcuser=dgb_electrum
+      -rpcpassword=CHANGE_THIS_TO_A_LONG_RANDOM_PASSWORD
+      -rpcbind=0.0.0.0 -rpcallowip=127.0.0.1/32
+      -rpcallowip=192.168.1.0/24 -rpcallowip=172.16.0.0/12
+      -rpcport=14022 -maxconnections=32
+    container_name: dgb_full_node
+    deploy:
+      resources:
+        limits:
+          cpus: '6.0'
+          memory: 8G
+        reservations:
+          memory: 4096M
+    image: blocknetdx/digibyte:latest
+    networks:
+      dgb-electrum-net:
+        aliases:
+          - digibyte
+    ports:
+      - '14022:14022'
+      - '12024:12024'
+    restart: unless-stopped
+    volumes:
+      - /mnt/<pool>/apps/digibyte-data:/opt/blockchain/data
+```
 
-[Our logo](logo/) is generously provided by [Dominik Průša](https://github.com/DominoPrusa) under the MIT license.
-Based on the [Electrum logo](https://github.com/spesmilo/electrum/blob/master/LICENCE)
-and the [Rust language logo](https://www.rust-lang.org/policies/media-guide).
+Replace the following values before deploying:
+
+- `/mnt/<pool>/apps/digibyte-data` with the TrueNAS dataset path for the node.
+- `CHANGE_THIS_TO_A_LONG_RANDOM_PASSWORD` with a long unique RPC password.
+- `192.168.1.0/24` with the trusted LAN CIDR, if different.
+
+The RPC username and password must match the values in the electrs configuration.
+The RPC allow-list should be as narrow as possible. Do not publish port `14022`
+to the Internet, and do not reuse the RPC password for another service.
+
+Start the node and wait for it to finish its initial DigiByte synchronization.
+Confirm that the container is healthy and that `txindex` has completed its
+initial indexing before starting electrs.
+
+## Step 2: Create the DigiByte electrs Custom App
+
+Create a second TrueNAS Custom App using this Compose-compatible YAML. It joins
+the existing `dgb-electrum-net` network created by the node app:
+
+```yaml
+name: electrs-digibyte
+
+services:
+  electrs:
+    image: ghcr.io/digibyte-electrum/electrs:digibyte-support
+    pull_policy: always
+    container_name: dgb_electrs
+    user: "568:568"
+    restart: unless-stopped
+    stop_grace_period: 2m
+    command:
+      - --conf
+      - /electrs.toml
+    configs:
+      - source: electrs_config
+        target: /electrs.toml
+        uid: "568"
+        gid: "568"
+        mode: 0440
+    networks:
+      - dgb-electrum-net
+    ports:
+      - "50011:50001"
+    volumes:
+      - type: bind
+        source: /mnt/<pool>/apps/electrs-digibyte
+        target: /data
+
+configs:
+  electrs_config:
+    content: |
+      network = "digibyte"
+      auth = "dgb_electrum:CHANGE_THIS_TO_A_LONG_RANDOM_PASSWORD"
+      daemon_rpc_addr = "digibyte:14022"
+      daemon_p2p_addr = "digibyte:12024"
+      electrum_rpc_addr = "0.0.0.0:50001"
+      monitoring_addr = "0.0.0.0:4225"
+      db_dir = "/data"
+      log_filters = "INFO"
+
+networks:
+  dgb-electrum-net:
+    external: true
+    name: dgb-electrum-net
+```
+
+Replace both `<pool>` paths with the appropriate TrueNAS dataset paths and use
+the same RPC username/password configured in the DigiByte node app. The electrs
+dataset must be writable by UID/GID `568`, or the container permissions must be
+adjusted to match the ownership policy of the chosen dataset.
+
+After deployment, follow the electrs logs. The first startup builds the index
+and can take a significant amount of time. Restarting the container does not
+discard a completed index; it resumes from the data stored in `/data`.
+
+## Connecting Electrum-DigiByte
+
+Configure the wallet to connect to the TrueNAS host running electrs:
+
+```text
+<truenas-host>:50011:t
+```
+
+Use **Connect only to a single server** while testing. The wallet should report
+the electrs server height and eventually show synchronized status. Wallet header
+verification remains enabled: electrs accelerates transaction queries, but the
+wallet still validates the headers it receives according to DigiByte consensus.
+
+## Updating and troubleshooting
+
+- Update the DigiByte node first, allow it to resynchronize, then update electrs.
+- Keep the node and electrs datasets persistent; deleting the electrs dataset
+  forces the index to be rebuilt.
+- If electrs cannot connect, check that both apps are attached to
+  `dgb-electrum-net`, that the node service alias is `digibyte`, and that the
+  RPC credentials match exactly.
+- If electrs reports that the node is still catching up, wait for the node's
+  initial blockchain and `txindex` synchronization.
+- If the wallet cannot connect, verify that TrueNAS publishes host port `50011`
+  and that the firewall permits it from the wallet's network.
+- Keep RPC port `14022` restricted to the node network and trusted LAN hosts.
+
+## Upstream project
+
+This repository is based on the original Rust electrs project by Romanz. See
+the upstream documentation for general architecture, Rust development, database
+schema, monitoring, and contribution information. DigiByte-specific consensus,
+network, image, and TrueNAS deployment behavior is documented here.
+
+## License and logo
+
+See the repository license and the upstream project for licensing details. The
+repository logo remains the upstream electrs artwork.
